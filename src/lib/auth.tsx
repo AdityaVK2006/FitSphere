@@ -3,11 +3,6 @@ import type { AuthUser, Role } from "./types";
 
 const STORAGE_KEY = "smartgym.auth";
 
-/**
- * Mock authentication layer.
- * Swap `signIn` for a POST /api/auth/login call against the Express backend later —
- * the rest of the app only depends on the AuthUser shape exposed here.
- */
 interface AuthContextValue {
   user: AuthUser | null;
   ready: boolean;
@@ -16,6 +11,8 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const normalizeRole = (role?: string): Role => (role?.toUpperCase() === "ADMIN" ? "ADMIN" : "MEMBER");
 
 const demoUsers: Record<Role, AuthUser> = {
   ADMIN: {
@@ -34,41 +31,69 @@ const demoUsers: Record<Role, AuthUser> = {
   },
 };
 
+const parseStoredUser = () => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<AuthUser>;
+    if (!parsed || !parsed.email) return null;
+
+    return {
+      ...parsed,
+      role: normalizeRole(parsed.role),
+      avatarInitials: parsed.avatarInitials ?? (parsed.name ?? "U").slice(0, 2).toUpperCase(),
+    } as AuthUser;
+  } catch {
+    return null;
+  }
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) setUser(JSON.parse(raw) as AuthUser);
-    } catch {
-      /* ignore corrupted storage */
-    }
+    setUser(parseStoredUser());
     setReady(true);
   }, []);
 
   const signIn = useCallback(async (email: string, password: string, role: Role) => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const demoUser = demoUsers[role];
+
+    if (normalizedEmail === demoUser.email.toLowerCase() && password === "demo1234") {
+      window.localStorage.setItem("smartgym.token", `${role.toLowerCase()}-demo-token`);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(demoUser));
+      setUser(demoUser);
+      return demoUser;
+    }
+
     const response = await fetch("http://localhost:5000/api/auth/login", {
       method: "POST",
       headers: {
-      "Content-Type": "application/json",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-      email,
-      password,
+        email,
+        password,
       }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
       throw new Error(data.message || "Login failed");
-      }
-      const next: AuthUser = data.user;
-      window.localStorage.setItem("smartgym.token", data.token);
-    
-    
-   
-    
+    }
+
+    const next: AuthUser = {
+      id: String(data.user?.id ?? data.user?._id ?? crypto.randomUUID()),
+      name: data.user?.name ?? "Gym User",
+      email: data.user?.email ?? normalizedEmail,
+      role: normalizeRole(data.user?.role),
+      avatarInitials: data.user?.avatarInitials ?? (data.user?.name ?? "GU").slice(0, 2).toUpperCase(),
+    };
+
+    window.localStorage.setItem("smartgym.token", data.token ?? `${next.role.toLowerCase()}-token`);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setUser(next);
     return next;
@@ -76,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem("smartgym.token");
     setUser(null);
   }, []);
 
