@@ -48,10 +48,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setReady(true);
   }, []);
 
-  const signIn = useCallback(async (email: string, _password: string, role: Role) => {
-    await new Promise((r) => setTimeout(r, 700));
-    const base = demoUsers[role];
-    const next: AuthUser = { ...base, email: email || base.email };
+  const signIn = useCallback(async (email: string, password: string, role: Role) => {
+    const response = await fetch("http://localhost:5000/api/auth/login", {
+      method: "POST",
+      headers: {
+      "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+      email,
+      password,
+      }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+      throw new Error(data.message || "Login failed");
+      }
+      const next: AuthUser = data.user;
+      window.localStorage.setItem("smartgym.token", data.token);
+    
+    
+   
+    
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setUser(next);
     return next;
